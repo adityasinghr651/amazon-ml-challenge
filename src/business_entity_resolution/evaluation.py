@@ -2,6 +2,7 @@
 Phase 5 & 6: evaluation.py
 Calculates validation metrics including Macro F0.5.
 """
+# pyrefly: ignore [missing-import]
 import numpy as np
 
 def calculate_metrics(predictions: dict, ground_truth: dict) -> dict:
