@@ -1,0 +1,9 @@
+# Ignore dataset and output folders to prevent massive uploads
+dataset/
+output/
+scratch/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class

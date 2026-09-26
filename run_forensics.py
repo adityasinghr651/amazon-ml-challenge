@@ -78,8 +78,8 @@ def analyze_ground_truth(gt_df, s1_df, s2_df, s3_df):
 
 def generate_report():
     print("Loading data...")
-    train_dir = "data/train"
-    test_dir = "data/test"
+    train_dir = "dataset/train"
+    test_dir = "dataset/test"
     
     s1_train = load_tsv(os.path.join(train_dir, "train_source1.tsv"))
     s2_train = load_tsv(os.path.join(train_dir, "train_source2.tsv"))
@@ -104,6 +104,7 @@ def generate_report():
     report_lines.append(analyze_dataframe(s3_test, "Source 3 (Test)"))
     
     output_path = "results/dataset_forensics_report.md"
+    os.makedirs("results", exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
         f.writelines(report_lines)
     
