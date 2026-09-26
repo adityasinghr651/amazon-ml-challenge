@@ -1,8 +1,10 @@
 # Amazon ML Challenge 2026: Business Entity Resolution — Project State
 
 > **Last Updated:** Phase 1 Complete (September 2026)  
-> **Target Metric:** Macro-averaged $F_{0.5}$ (Precision-heavy: $2\times$ precision weight)  
-> **Key Outputs:** `output/matching_results.tsv` (Leaderboard), `output/candidate_pairs.tsv` (Audit/Final Ranking)
+> **Core Optimization Mandate:** **TWO-OBJECTIVE OPTIMIZATION**  
+> 1. **High-Quality Entity Matching:** Macro-averaged $F_{0.5}$ (Precision-heavy: $2\times$ weight on precision; singletons protected)  
+> 2. **Efficient, Scalable Blocking / Candidate Generation:** Smallest practical candidate set per $S_1$ entity while preserving high candidate recall ceiling and large reduction ratio ($>99.99\%$).  
+> **Key Outputs:** `output/matching_results.tsv` (Leaderboard Score) & `output/candidate_pairs.tsv` (Audit & Final Ranking Evaluation)
 
 ---
 
@@ -14,8 +16,8 @@
 ├─────────┼─────────────────────────────────────────────────┼────────────┼──────────────────────────────────────┤
 │ Phase 0 │ Environment & Repository Infrastructure         │ [DONE]     │ requirements.txt, io.py, evaluation.py│
 │ Phase 1 │ Comprehensive Dataset Forensics & Noise Profile │ [DONE]     │ docs/phase_reports/phase_01_*.md     │
-│ Phase 2 │ Multi-Representation Normalization Engine       │ [CURRENT]  │ src/business_entity_resolution/norm* │
-│ Phase 3 │ High-Recall Multi-Blocker & candidate_pairs.tsv  │ [PENDING]  │ src/business_entity_resolution/block*│
+│ Phase 2 │ Multi-Representation Normalization Engine       │ [DONE]     │ docs/phase_reports/phase_02_*.md     │
+│ Phase 3 │ High-Recall Multi-Blocker & candidate_pairs.tsv  │ [CURRENT]  │ src/business_entity_resolution/block*│
 │ Phase 4 │ Pairwise Feature Engineering (Vectorized)       │ [PENDING]  │ src/business_entity_resolution/feat* │
 │ Phase 5 │ Baseline ML Model & Hard Negative Mining        │ [PENDING]  │ src/business_entity_resolution/train*│
 │ Phase 6 │ Macro F0.5 Threshold & Singleton Decision Layer │ [PENDING]  │ src/business_entity_resolution/dec*  │
