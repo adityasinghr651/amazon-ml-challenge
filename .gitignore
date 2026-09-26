@@ -1,9 +1,54 @@
-# Ignore dataset and output folders to prevent massive uploads
-dataset/
-output/
-scratch/
+# Virtual Environments
+.venv/
+venv/
+env/
+ENV/
+.env/
 
-# Python cache
+# Datasets and Large Data Folders
+student_resource/
+dataset/
+datasets/
+data/
+*.tsv
+*.parquet
+*.feather
+
+# Output, Checkpoints, and Experiments
+output/
+outputs/
+results/
+scratch/
+submissions/
+models/
+checkpoints/
+*.pkl
+*.pickle
+*.joblib
+*.npy
+*.npz
+
+# Python cache & artifacts
 __pycache__/
 *.py[cod]
 *$py.class
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# IDE and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+*.log
+
