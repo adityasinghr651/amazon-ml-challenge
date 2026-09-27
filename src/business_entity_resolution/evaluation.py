@@ -4,6 +4,21 @@ Calculates validation metrics including Macro F0.5.
 """
 # pyrefly: ignore [missing-import]
 import numpy as np
+from sklearn.model_selection import train_test_split
+
+def split_entities(s1_ids, ground_truth, val_frac=0.2, seed=42):
+    """Splits S1 entities into train and val."""
+    s1_ids = list(s1_ids)
+    train_ids, val_ids = train_test_split(s1_ids, test_size=val_frac, random_state=seed)
+    
+    def pct_singleton(ids):
+        singletons = sum(1 for x in ids if not ground_truth.get(x, []))
+        return (singletons / len(ids) * 100) if len(ids) > 0 else 0.0
+
+    print(f"Train split: {len(train_ids)} S1 entities ({pct_singleton(train_ids):.1f}% singletons)")
+    print(f"Val split: {len(val_ids)} S1 entities ({pct_singleton(val_ids):.1f}% singletons)")
+    
+    return train_ids, val_ids
 
 def calculate_metrics(predictions: dict, ground_truth: dict) -> dict:
     """

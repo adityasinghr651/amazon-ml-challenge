@@ -1,1 +1,6 @@
 Experiment,Blocking,Features,Model,Threshold,Candidate Recall,Precision,Recall,F0.5,Avg Candidates,Runtime
+Phase5_Baseline,Baseline_Rules,Basic_Strings,LogReg (Plain),0.5,1.0000,0.9600,0.8900,0.9451,783.4,0.14
+Phase5_Baseline,Baseline_Rules,Basic_Strings,LogReg (Balanced),0.5,1.0000,0.2520,0.5055,0.2801,783.4,0.15
+Phase5_Baseline,Baseline_Rules,Basic_Strings,RandomForest,0.5,1.0000,0.9322,0.9052,0.9267,783.4,4.64
+Phase5_Ablation,Baseline_Rules,Name_Only,LogReg (Balanced),0.5,1.0000,0.2116,0.4395,0.2360,783.4,0.15
+Phase5_Ablation,Baseline_Rules,Address_And_Country_Only,LogReg (Balanced),0.5,1.0000,0.2611,0.4732,0.2868,783.4,0.08
