@@ -175,9 +175,14 @@ def normalize_address(address: str) -> Dict[str, Any]:
     pins = re.findall(r'\b\d{5,6}\b', clean)
     pin_str = pins[0] if pins else ""
     
-    # 2. Extract all structural numeric tokens
+    # 2. Extract primary number anchor
+    # Strip common prefixes before pulling the numeric token
+    temp_for_num = re.sub(r'\b(flat no|house no|no)\s*[\.\-]?\s*', '', clean)
+    match = re.search(r'\b\d+[a-z0-9/\-]*', temp_for_num)
+    primary_num = match.group(0).strip("-/") if match else ""
+    
+    # Also keep the original numbers extraction for other features
     numbers = re.findall(r'\b\d+\b', clean)
-    primary_num = numbers[0] if numbers else ""
     
     # 3. Punctuation standardization
     clean = re.sub(r'[^\w\s]', ' ', clean, flags=re.UNICODE)

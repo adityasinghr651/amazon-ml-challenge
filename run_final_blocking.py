@@ -95,15 +95,31 @@ def main():
 
     # 3. Union & Provenance
     print("\n[3/4] Materializing candidate union & tracking provenance...")
-    union_dict: Dict[str, Set[str]] = {s1: set() for s1 in s1_df['entity_id']}
-    for d in [cands_a, cands_b, cands_c, cands_d, cands_h]:
-        for s1, cset in d.items():
-            union_dict[s1].update(cset)
+    from src.business_entity_resolution.blocking.union import CandidateUnionEngine
+    union_engine = CandidateUnionEngine()
+    
+    union_engine.add_blocker_results('exact_name', cands_a)
+    union_engine.add_blocker_results('address', cands_b)
+    union_engine.add_blocker_results('rare_token', cands_c)
+    union_engine.add_blocker_results('char_retrieval_reciprocal', cands_d)
+    union_engine.add_blocker_results('transliteration', cands_h)
 
-    # Evaluate
+    # Evaluate BEFORE pruning
+    raw_union_dict = union_engine.get_candidate_dict()
+    metrics_before = evaluate_candidate_pairs(raw_union_dict, gt_dict, total_target_records=total_target)
+    print(f"\nPre-Pruning Candidate Recall: {metrics_before['pair_recall']*100:.2f}% (Average {metrics_before['avg_candidates']:.2f} cands/S1)")
+
+    # Apply Pruning
+    union_engine.prune(s1_df, target_df, max_cands=50, top_k=20)
+    
+    # Evaluate AFTER pruning
+    union_dict = union_engine.get_candidate_dict()
     metrics = evaluate_candidate_pairs(union_dict, gt_dict, total_target_records=total_target)
-    print("\nFinal Blocking Performance:")
-    print(f"  Pair-Level Blocking Recall: {metrics['pair_recall']*100:.2f}% (15,683 / 17,403 true matches)")
+    
+    recall_drop = (metrics_before['pair_recall'] - metrics['pair_recall']) * 100
+    
+    print("\nFinal Blocking Performance (POST-PRUNING):")
+    print(f"  Pair-Level Blocking Recall: {metrics['pair_recall']*100:.2f}% (Dropped {recall_drop:.2f}%)")
     print(f"  Full Entity Recovery:       {metrics['entity_recovery']*100:.2f}% (3,692 / 4,721 non-singletons)")
     print(f"  Total Candidate Pairs:      {metrics['total_candidates']:,}")
     print(f"  Average Candidates / S1:    {metrics['avg_candidates']:.2f}")
