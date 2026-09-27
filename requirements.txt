@@ -1,8 +1,10 @@
 pandas
 numpy
+scipy
 rapidfuzz
 scikit-learn
-lightgbm==4.5.0
+lightgbm
+anyascii
 pytest
 psutil
 joblib

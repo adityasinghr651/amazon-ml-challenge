@@ -1,0 +1,2 @@
+strategy	recall	entity_recovery	total_candidates	avg_candidates	median_candidates	p95	p99	p99_9	max_candidates	runtime
+A_plus_B_plus_C_plus_D	0.8568	0.6943	151509	30.3	21.0	80.0	105.0	174.0	179	1.06

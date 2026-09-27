@@ -1,0 +1,7 @@
+Blocker_1	Blocker_2	B1_Total_Pairs	B2_Total_Pairs	Overlapping_Pairs	B1_Unique_Pairs	B2_Unique_Pairs	Overlapping_True_Matches	B1_Unique_True_Matches	B2_Unique_True_Matches
+Block_A_ExactName	Block_C_RareTokens	13322	83788	7328	5994	76460	6356	2268	3880
+Block_A_ExactName	Block_D_CharRetrieval	13322	97829	11625	1697	86204	8611	13	5986
+Block_A_ExactName	Block_B_AddressAnchors	13322	1018	406	12916	612	406	8218	435
+Block_C_RareTokens	Block_D_CharRetrieval	83788	97829	31972	51816	65857	10008	228	4589
+Block_C_RareTokens	Block_B_AddressAnchors	83788	1018	549	83239	469	549	9687	292
+Block_D_CharRetrieval	Block_B_AddressAnchors	97829	1018	755	97074	263	755	13842	86

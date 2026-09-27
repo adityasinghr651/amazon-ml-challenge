@@ -1,0 +1,40 @@
+blockers:
+  address:
+    anchors:
+    - pin_primary_num
+    enabled: true
+    max_bucket_size: 500
+  char_retrieval:
+    enabled: true
+    ngram_range:
+    - 2
+    - 4
+    reciprocal: true
+    reciprocal_top_k: 1
+    sim_threshold: 0.25
+    top_k: 20
+  exact_name:
+    enabled: true
+    representations:
+    - clean
+    - core
+    - sorted
+  rare_token:
+    enabled: true
+    max_bucket_size: 300
+    max_df: 100
+    top_n: 2
+  transliteration:
+    enabled: true
+    library: anyascii
+    max_bucket_size: 30
+    max_df: 150
+    min_token_len: 4
+country_routing:
+  fallback_to_global: true
+  partition_by_country: true
+pipeline: A_plus_B_plus_C_plus_D_reciprocal_plus_H_translit
+pruning:
+  enabled: false
+  strategy: none
+version: 2.0-final-official

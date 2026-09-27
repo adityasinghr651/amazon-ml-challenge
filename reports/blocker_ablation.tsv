@@ -1,0 +1,9 @@
+configuration	removed_component	pair_recall	recall_loss	total_candidates	avg_candidates	p95_candidates	max_candidates
+ALL_ACTIVE_COMPONENTS	NONE	0.89	0.0	684755	136.95	299.1	502
+ALL_MINUS_A_ExactName	A_ExactName	0.8897	0.0002	683921	136.78	299.0	502
+ALL_MINUS_B_Address	B_Address	0.8876	0.0024	684537	136.91	299.1	502
+ALL_MINUS_C_RareToken	C_RareToken	0.8825	0.0075	570906	114.18	251.0	375
+ALL_MINUS_D_CharRetrievalK50	D_CharRetrievalK50	0.7896	0.1003	531533	106.31	276.1	482
+ALL_MINUS_H_Transliteration	H_Transliteration	0.8863	0.0036	613628	122.73	288.0	480
+ALL_MINUS_G_SoftToken	G_SoftToken	0.8885	0.0015	433970	86.79	185.0	325
+ALL_MINUS_I_NameNumericHybrid	I_NameNumericHybrid	0.89	0.0	684755	136.95	299.1	502

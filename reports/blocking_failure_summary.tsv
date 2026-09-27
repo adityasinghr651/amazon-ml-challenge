@@ -1,0 +1,10 @@
+failure_category	missed_pair_count	percentage
+cross-script	1308	52.49
+abbreviation	315	12.64
+typo / spelling variation	297	11.92
+severe noise / vocabulary shift	294	11.8
+token variation	130	5.22
+short business name	51	2.05
+numeric mismatch	46	1.85
+missing address	27	1.08
+token reordering	24	0.96
