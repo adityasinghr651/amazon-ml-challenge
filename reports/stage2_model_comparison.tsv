@@ -1,0 +1,4 @@
+Stage	Model	Threshold	Macro F0.5	Precision	Recall	Singleton Acc	Matched Recall	Runtime
+Stage 1 Baseline	Logistic Regression (Plain)	0.55	93.91%	96.30%	85.43%	91.94%	85.00%	1.12s
+Stage 1 Baseline	Random Forest (100 trees)	0.6	94.48%	96.77%	86.32%	93.55%	85.84%	38.54s
+Stage 2 Winner	LightGBM (LGBM_Deeper_63Leaves)	0.8	94.59%	96.70%	87.00%	91.94%	86.68%	3.91s

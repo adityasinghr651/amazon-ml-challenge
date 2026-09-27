@@ -1,0 +1,8 @@
+Strategy	Num Hard Negatives	Optimal Threshold	Macro F0.5	Precision	Recall	Singleton Accuracy	Matched Recall	Runtime (s)	Delta vs Baseline
+Baseline_NoHNM	0	0.8	94.59	96.7	87.0	91.94	86.68	3.73	0.0
+HNM_Singleton_FP30_w3	8	0.8	94.48	96.67	86.64	91.94	86.29	4.05	-0.11
+HNM_Singleton_FP50_w5	8	0.75	94.62	96.72	87.09	91.94	86.77	3.54	0.04
+HNM_AllHard_FP50_w2	178	0.7	94.59	96.7	86.99	91.94	86.66	3.49	-0.0
+HNM_AllHard_FP50_w3	178	0.7	94.57	96.72	86.86	91.94	86.53	15.14	-0.02
+HNM_Duplication_Singleton_FP30	8	0.7	94.58	96.62	87.23	91.94	86.92	14.72	-0.01
+HNM_Duplication_AllHard_FP50	178	0.8	94.58	96.81	86.57	91.94	86.22	14.44	-0.01

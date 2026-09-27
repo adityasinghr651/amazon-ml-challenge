@@ -230,3 +230,6 @@ def process_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         df_out['country_norm'] = df_out['country'].astype(str).str.strip().str.upper()
 
     return df_out
+
+# Backward compatibility alias
+normalize_dataframe = process_dataframe

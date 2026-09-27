@@ -29,6 +29,9 @@ def calculate_metrics(predictions: dict, ground_truth: dict) -> dict:
     """
     precisions = []
     recalls = []
+    singleton_correct = 0
+    total_singletons = 0
+    matched_recalls = []
     
     for s1_id, true_matches in ground_truth.items():
         pred_matches = predictions.get(s1_id, [])
@@ -40,16 +43,20 @@ def calculate_metrics(predictions: dict, ground_truth: dict) -> dict:
         if len(true_set) == 0 and len(pred_set) == 0:
             precisions.append(1.0)
             recalls.append(1.0)
+            singleton_correct += 1
+            total_singletons += 1
             continue
         # Singleton incorrectly predicted to have matches
         elif len(true_set) == 0 and len(pred_set) > 0:
             precisions.append(0.0)
             recalls.append(0.0)
+            total_singletons += 1
             continue
         # Failed to predict any matches for a non-singleton
         elif len(pred_set) == 0 and len(true_set) > 0:
             precisions.append(0.0)
             recalls.append(0.0)
+            matched_recalls.append(0.0)
             continue
             
         # Standard Precision/Recall calculation
@@ -60,9 +67,12 @@ def calculate_metrics(predictions: dict, ground_truth: dict) -> dict:
         
         precisions.append(p)
         recalls.append(r)
+        matched_recalls.append(r)
         
     avg_precision = np.mean(precisions) if precisions else 0.0
     avg_recall = np.mean(recalls) if recalls else 0.0
+    singleton_acc = (singleton_correct / total_singletons) if total_singletons > 0 else 1.0
+    avg_matched_recall = np.mean(matched_recalls) if matched_recalls else 0.0
     
     # Macro F0.5 = (1.25 * Precision * Recall) / (0.25 * Precision + Recall)
     if avg_precision + avg_recall == 0:
@@ -73,7 +83,11 @@ def calculate_metrics(predictions: dict, ground_truth: dict) -> dict:
     return {
         "macro_f05": f0_5,
         "macro_precision": avg_precision,
-        "macro_recall": avg_recall
+        "macro_recall": avg_recall,
+        "singleton_accuracy": singleton_acc,
+        "matched_recall": avg_matched_recall,
+        "total_singletons": total_singletons,
+        "total_entities": len(ground_truth)
     }
 
 def calculate_candidate_recall(candidates: dict, ground_truth: dict) -> float:

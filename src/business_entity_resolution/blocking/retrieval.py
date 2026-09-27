@@ -27,7 +27,8 @@ class CharNgramRetrievalBlocker(BaseBlocker):
         sim_threshold: float = 0.25,
         reciprocal: bool = False,
         reciprocal_top_k: int = 1,
-        partition_by_country: bool = True
+        partition_by_country: bool = True,
+        batch_size: Optional[int] = None
     ):
         super().__init__(name=name, config=config)
         self.cfg = config or RetrievalConfig()
@@ -37,18 +38,21 @@ class CharNgramRetrievalBlocker(BaseBlocker):
         self.sim_threshold = sim_threshold
         self.reciprocal = reciprocal
         self.reciprocal_top_k = reciprocal_top_k
-        self.batch_size = self.cfg.batch_size
+        self.batch_size = batch_size if batch_size is not None else 500
 
         self.vectorizer: Optional[TfidfVectorizer] = None
         self.country_matrices: Dict[str, sp.csr_matrix] = {}
+        self.country_matrices_T: Dict[str, sp.csc_matrix] = {}
         self.country_eids: Dict[str, np.ndarray] = {}
         self.global_matrix: Optional[sp.csr_matrix] = None
+        self.global_matrix_T: Optional[sp.csc_matrix] = None
         self.global_eids: Optional[np.ndarray] = None
         self.target_countries: Set[str] = set()
 
     def fit(self, target_df: pd.DataFrame) -> 'CharNgramRetrievalBlocker':
         t0 = time.time()
         self.country_matrices.clear()
+        self.country_matrices_T.clear()
         self.country_eids.clear()
 
         has_country = 'country_norm' in target_df.columns and self.partition_by_country
@@ -70,6 +74,7 @@ class CharNgramRetrievalBlocker(BaseBlocker):
         )
         X_all = self.vectorizer.fit_transform(names)
         self.global_matrix = X_all
+        self.global_matrix_T = X_all.T.tocsc()
         self.global_eids = eids
 
         # Partition target matrices by country
@@ -77,7 +82,9 @@ class CharNgramRetrievalBlocker(BaseBlocker):
             unique_c = target_df['country_norm'].unique()
             for c in unique_c:
                 mask = (countries == c)
-                self.country_matrices[c] = X_all[mask]
+                sub_mat = X_all[mask]
+                self.country_matrices[c] = sub_mat
+                self.country_matrices_T[c] = sub_mat.T.tocsc()
                 self.country_eids[c] = eids[mask]
 
         self.index_time = time.time() - t0
@@ -104,9 +111,11 @@ class CharNgramRetrievalBlocker(BaseBlocker):
             c_key = c_val if (has_country and c_val in self.country_matrices) else '__GLOBAL__'
             if has_country and c_key in self.country_matrices:
                 target_mat = self.country_matrices[c_key]
+                target_mat_T = self.country_matrices_T[c_key]
                 target_eids = self.country_eids[c_key]
             else:
                 target_mat = self.global_matrix
+                target_mat_T = self.global_matrix_T
                 target_eids = self.global_eids
 
             if target_mat.shape[0] == 0:
@@ -117,13 +126,19 @@ class CharNgramRetrievalBlocker(BaseBlocker):
             sub_names = query_names[mask]
             sub_eids = query_eids[mask]
 
-            for chunk_start in range(0, len(sub_names), self.batch_size):
-                chunk_end = min(chunk_start + self.batch_size, len(sub_names))
+            # Adaptive memory-safe batch size: cap intermediate matrix at 150M elements (<= 600 MB)
+            n_target_rows = target_mat.shape[0]
+            effective_batch_size = max(10, min(self.batch_size, int(150_000_000 / max(n_target_rows, 1))))
+
+            for chunk_start in range(0, len(sub_names), effective_batch_size):
+                chunk_end = min(chunk_start + effective_batch_size, len(sub_names))
                 chunk_names = sub_names[chunk_start:chunk_end]
                 chunk_eids = sub_eids[chunk_start:chunk_end]
 
                 X_chunk = self.vectorizer.transform(chunk_names)
-                scores_mat = X_chunk.dot(target_mat.T).tocsr()
+                scores_mat = X_chunk.dot(target_mat_T).tocsr()
+                scores_mat.data[scores_mat.data < self.sim_threshold] = 0
+                scores_mat.eliminate_zeros()
 
                 indptr = scores_mat.indptr
                 data = scores_mat.data
@@ -164,11 +179,10 @@ class CharNgramRetrievalBlocker(BaseBlocker):
                     r_data = rev_mat.data
                     r_indices = rev_mat.indices
 
-                    for j in range(rev_mat.shape[0]):
+                    active_targets = np.flatnonzero(np.diff(r_indptr) > 0)
+                    for j in active_targets:
                         r_start = r_indptr[j]
                         r_end = r_indptr[j + 1]
-                        if r_start == r_end:
-                            continue
 
                         col_data = r_data[r_start:r_end]
                         col_indices = r_indices[r_start:r_end]

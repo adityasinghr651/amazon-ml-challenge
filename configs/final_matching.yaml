@@ -1,0 +1,120 @@
+# configs/final_matching.yaml
+# Amazon ML Challenge 2026 - Business Entity Resolution
+# Frozen Stage 4 Production Configuration
+
+system:
+  version: "1.0.0-frozen"
+  date: "2026-09-27"
+  stage: "Final Matching & Decision Layer"
+  reproducible_seed: 42
+
+blocking_baseline:
+  status: "FROZEN"
+  candidate_file: "output/candidate_pairs.tsv"
+  candidate_diagnostics: "output/candidate_pairs_diagnostics.tsv"
+  benchmark_pair_recall: 0.9012
+  benchmark_total_candidates: 474960
+  strategies:
+    - "exact_normalized_name"
+    - "address_anchor"
+    - "rare_token_inverted_index"
+    - "character_tfidf_retrieval"
+    - "cross_script_transliteration"
+
+features:
+  feature_set_version: "Feature_Set_v1"
+  total_features: 32
+  categories:
+    name_features:
+      count: 13
+      names:
+        - "name_exact"
+        - "name_core_exact"
+        - "name_sorted_exact"
+        - "name_lev"
+        - "name_jaro"
+        - "name_token_sort_ratio"
+        - "name_token_set_ratio"
+        - "name_wratio"
+        - "name_token_jaccard"
+        - "name_token_overlap"
+        - "name_rare_token_overlap"
+        - "name_token_count_diff"
+        - "name_length_ratio"
+    address_features:
+      count: 7
+      names:
+        - "addr_lev"
+        - "addr_token_sort_ratio"
+        - "addr_token_jaccard"
+        - "addr_pin_match"
+        - "addr_num_match"
+        - "addr_length_ratio"
+        - "addr_either_missing"
+    cross_script_features:
+      count: 2
+      names:
+        - "name_translit_lev"
+        - "name_translit_exact"
+    cross_field_features:
+      count: 4
+      names:
+        - "country_match"
+        - "cross_name_addr"
+        - "name_high_addr_missing"
+        - "name_exact_addr_match"
+    provenance_features:
+      count: 6
+      names:
+        - "prov_exact_name"
+        - "prov_address"
+        - "prov_rare_token"
+        - "prov_retrieval_reciprocal"
+        - "prov_transliteration"
+        - "prov_count"
+
+model:
+  algorithm: "LightGBM Classifier"
+  framework: "lightgbm"
+  framework_version: "4.7.0"
+  hyperparameters:
+    n_estimators: 300
+    learning_rate: 0.05
+    num_leaves: 63
+    max_depth: 8
+    min_child_samples: 20
+    subsample: 0.8
+    colsample_bytree: 0.8
+    random_state: 42
+    n_jobs: -1
+    verbose: -1
+
+decision_layer:
+  decision_rule: "Pure Calibrated Probability Threshold"
+  calibrated_threshold: 0.80
+  top1_exclusivity: false
+  score_margin_constraint: false
+  hard_negative_mining: false
+
+validation_performance:
+  validation_protocol: "5-Fold Entity-Stratified Cross-Validation (Full 5,000 S1 Benchmark)"
+  cv_macro_f0_5_mean: 0.9500
+  cv_macro_f0_5_std: 0.0027
+  cv_precision_mean: 0.9690
+  cv_precision_std: 0.0028
+  cv_recall_mean: 0.8806
+  cv_recall_std: 0.0067
+  cv_singleton_accuracy_mean: 0.9649
+  cv_singleton_accuracy_std: 0.0333
+  cv_matched_recall_mean: 0.8757
+  cv_matched_recall_std: 0.0065
+  note: "95.00% is the 5-fold CV mean score across the benchmark split, not a guaranteed test leaderboard score."
+
+submission:
+  matching_output: "output/matching_results.tsv"
+  candidate_output: "output/candidate_pairs.tsv"
+  total_s1_entities: 5000
+  predicted_singletons: 380
+  predicted_matched_entities: 4620
+  total_matched_pairs: 15560
+  validator_status: "PASSED (exit code 0)"
