@@ -1,205 +1,218 @@
+"""
+run_phase5.py — End-to-end training pipeline.
+
+1. Load data (10% S1 sample for speed, full S2/S3 for blocking)
+2. Normalize → Block → Label (using preprocessing.build_labeled_pairs)
+3. Entity-grouped train/val/holdout split
+4. Extract features → Train models (LR, RF, LightGBM)
+5. Threshold search on val split
+6. Report metrics
+"""
+
 import os
 import sys
 import time
-import pandas as pd
 import numpy as np
+import pandas as pd
 
-# Mocking missing output directory
+sys.path.insert(0, os.getcwd())
+
+from src.business_entity_resolution.io import load_train_data
+from src.business_entity_resolution.normalization import process_dataframe
+from src.business_entity_resolution.blocking import generate_candidates
+from src.business_entity_resolution.preprocessing import (
+    parse_ground_truth,
+    build_labeled_pairs,
+    entity_grouped_split,
+    sample_s1_grouped,
+)
+from src.business_entity_resolution.features import extract_features, extract_features_batch
+from src.business_entity_resolution.training import train_logreg, train_rf, train_lgbm, save_model
+from src.business_entity_resolution.evaluation import calculate_metrics
+from src.business_entity_resolution.decision import predict_matches, optimize_threshold
+from src.business_entity_resolution.utils import load_config, get_blocking_config, log_experiment
+
 os.makedirs("output/train", exist_ok=True)
 os.makedirs("experiments/models", exist_ok=True)
 
-# 1. LOAD A FAST SUBSET OF DATA
-print("Loading data subset...")
-base = os.path.dirname(os.path.abspath(__file__))
 
-# Read Ground Truth
-gt_path = os.path.join(base, "dataset", "train", "train_ground_truth.tsv")
-gt = pd.read_csv(gt_path, sep="\t", dtype=str, keep_default_na=False)
+def main():
+    cfg = load_config()
+    seed = cfg["random_state"]
+    blk_config = get_blocking_config(cfg)
 
-# Sample 500 S1 IDs (250 with matches, 250 singletons)
-gt_with_matches = gt[gt["matched_entity_ids"] != ""]
-gt_singletons = gt[gt["matched_entity_ids"] == ""]
-sampled_gt = pd.concat([gt_with_matches.head(250), gt_singletons.head(250)])
-s1_subset_ids = set(sampled_gt["source1_entity_id"])
+    # ===================================================================
+    # 1. LOAD DATA
+    # ===================================================================
+    print("=" * 70)
+    print("PHASE 5 — Training Pipeline (config-driven, no true-match injection)")
+    print("=" * 70)
 
-ground_truth = {}
-for _, row in sampled_gt.iterrows():
-    if row["matched_entity_ids"]:
-        ground_truth[row["source1_entity_id"]] = row["matched_entity_ids"].split(",")
-    else:
-        ground_truth[row["source1_entity_id"]] = []
+    print("\nLoading data...")
+    s1_full, s2, s3, gt_df = load_train_data()
+    ground_truth = parse_ground_truth(gt_df)
 
-s1 = pd.read_csv(os.path.join(base, "dataset", "train", "train_source1.tsv"), sep="\t", dtype=str, keep_default_na=False)
-s1 = s1[s1["entity_id"].isin(s1_subset_ids)]
+    # 10% entity-grouped sample of S1 for tractable runtime
+    print("Sampling 10% of S1 (entity-grouped)...")
+    s1 = sample_s1_grouped(s1_full, frac=0.10, seed=seed)
+    print(f"  S1 sample: {len(s1):,} rows")
+    del s1_full
 
-# Get true S2/S3 IDs to load so we don't load 1GB of data
-needed_s2s3 = set()
-for matches in ground_truth.values():
-    needed_s2s3.update(matches)
-
-# Let's add some negative examples (just take top 1000 rows from s2/s3)
-s2 = pd.read_csv(os.path.join(base, "dataset", "train", "train_source2.tsv"), sep="\t", dtype=str, keep_default_na=False, nrows=5000)
-s3 = pd.read_csv(os.path.join(base, "dataset", "train", "train_source3.tsv"), sep="\t", dtype=str, keep_default_na=False, nrows=5000)
-
-s2_all = pd.read_csv(os.path.join(base, "dataset", "train", "train_source2.tsv"), sep="\t", dtype=str, keep_default_na=False)
-s3_all = pd.read_csv(os.path.join(base, "dataset", "train", "train_source3.tsv"), sep="\t", dtype=str, keep_default_na=False)
-
-s2_true = s2_all[s2_all["entity_id"].isin(needed_s2s3)]
-s3_true = s3_all[s3_all["entity_id"].isin(needed_s2s3)]
-
-s2 = pd.concat([s2, s2_true]).drop_duplicates(subset=["entity_id"])
-s3 = pd.concat([s3, s3_true]).drop_duplicates(subset=["entity_id"])
-
-print("Data loaded. S1:", len(s1), "S2:", len(s2), "S3:", len(s3))
-
-# Normalize for baseline pipeline
-from baseline_pipeline import normalize_series
-for df in [s1, s2, s3]:
-    df["country"] = df["country"].str.lower().str.strip()
-    df["norm_name"] = normalize_series(df["business_name"])
-
-# GENERATE CANDIDATE PAIRS USING BASELINE
-from baseline_pipeline import run_pipeline
-print("Running blocking...")
-# run_pipeline modifies dataframes in place, need to use copies if we need original
-cands, _ = run_pipeline(s1.copy(), s2.copy(), s3.copy(), threshold=0.0) # lower threshold to get more candidates
-# We force true matches into candidates to simulate high recall blocking for the matching phase test
-for s1_id, matches in ground_truth.items():
-    existing = cands.get(s1_id, "")
-    ex_list = existing.split(",") if existing else []
-    for m in matches:
-        if m not in ex_list:
-            ex_list.append(m)
-    cands[s1_id] = ",".join(ex_list)
-
-# Split Entities
-from src.business_entity_resolution.evaluation import split_entities, calculate_metrics, calculate_candidate_recall
-train_s1_ids, val_s1_ids = split_entities(s1["entity_id"].values, ground_truth, val_frac=0.2, seed=42)
-
-# Build features
-from src.business_entity_resolution.features import extract_features
-
-records_db = {}
-for _, r in s1.iterrows(): records_db[r['entity_id']] = r.to_dict()
-for _, r in s2.iterrows(): records_db[r['entity_id']] = r.to_dict()
-for _, r in s3.iterrows(): records_db[r['entity_id']] = r.to_dict()
-
-def build_dataset(s1_ids):
-    X, y, meta = [], [], []
-    for s1_id in s1_ids:
-        cand_str = cands.get(s1_id, "")
-        cand_list = [c for c in cand_str.split(",") if c]
-        for c_id in cand_list:
-            if c_id not in records_db: continue
-            feat = extract_features(records_db[s1_id], records_db[c_id])
-            X.append([feat['name_lev'], feat['name_jaro'], feat['addr_lev'], feat['name_exact'], feat['country_match']])
-            label = 1 if c_id in ground_truth.get(s1_id, []) else 0
-            y.append(label)
-            meta.append((s1_id, c_id))
-    return np.array(X), np.array(y), meta
-
-print("Building train features...")
-X_train, y_train, _ = build_dataset(train_s1_ids)
-print("Building val features...")
-X_val, y_val, val_meta = build_dataset(val_s1_ids)
-
-print(f"Train pairs: {len(X_train)} (Positive: {sum(y_train)})")
-print(f"Val pairs: {len(X_val)} (Positive: {sum(y_val)})")
-
-# Train Models
-from src.business_entity_resolution.training import train_logreg, train_rf, save_model
-import time
-
-models_to_test = {
-    "LogReg (Plain)": lambda: train_logreg(X_train, y_train, balanced=False),
-    "LogReg (Balanced)": lambda: train_logreg(X_train, y_train, balanced=True),
-    "RandomForest": lambda: train_rf(X_train, y_train)
-}
-
-from src.business_entity_resolution.decision import predict_matches
-
-# Prepare experiment log
-log_path = os.path.join(base, "experiments", "experiment_log.csv")
-os.makedirs(os.path.dirname(log_path), exist_ok=True)
-if not os.path.exists(log_path):
-    with open(log_path, "w") as f:
-        f.write("Experiment,Blocking,Features,Model,Threshold,Candidate Recall,Precision,Recall,F0.5,Avg Candidates,Runtime\n")
-
-val_gt = {k: ground_truth[k] for k in val_s1_ids}
-val_cands_dict = {k: [c for c in cands.get(k, "").split(",") if c] for k in val_s1_ids}
-cand_recall = calculate_candidate_recall(val_cands_dict, val_gt)
-avg_cands = np.mean([len(v) for v in val_cands_dict.values()])
-
-for model_name, train_fn in models_to_test.items():
+    # ===================================================================
+    # 2. NORMALIZE → BLOCK → LABEL
+    # ===================================================================
+    print("\nNormalizing...")
     t0 = time.time()
-    model = train_fn()
-    save_model(model, f"experiments/models/{model_name.replace(' ', '_')}.pkl")
-    
-    if len(X_val) > 0:
+    s1_norm = process_dataframe(s1)
+    s2_norm = process_dataframe(s2)
+    s3_norm = process_dataframe(s3)
+    print(f"  Normalization: {time.time()-t0:.1f}s")
+
+    print("\nGenerating candidates (blocking)...")
+    t0 = time.time()
+    candidates_df = generate_candidates(s1_norm, s2_norm, s3_norm, blk_config)
+    print(f"  Blocking: {time.time()-t0:.1f}s  |  {len(candidates_df)} S1 entities")
+
+    print("\nLabeling candidate pairs against ground truth...")
+    labeled_df = build_labeled_pairs(candidates_df, ground_truth)
+    n_pos = labeled_df["label"].sum()
+    n_neg = len(labeled_df) - n_pos
+    print(f"  Total pairs: {len(labeled_df):,}  |  Positives: {n_pos:,}  |  Negatives: {n_neg:,}")
+    if n_pos == 0:
+        print("  ⚠️  WARNING: Zero positive labels — blocking recall may be too low!")
+        print("  Run run_blocking_exp.py first to diagnose.")
+        return
+
+    # ===================================================================
+    # 3. ENTITY-GROUPED SPLIT
+    # ===================================================================
+    s1_ids = s1["entity_id"].unique()
+    train_ids, val_ids, holdout_ids = entity_grouped_split(
+        s1_ids, ground_truth,
+        val_frac=cfg["splits"]["val_frac"],
+        holdout_frac=cfg["splits"]["holdout_frac"],
+        seed=seed,
+    )
+
+    train_set = set(train_ids)
+    val_set = set(val_ids)
+    # holdout is NOT touched during Steps 2-4
+
+    train_pairs = labeled_df[labeled_df["source1_entity_id"].isin(train_set)]
+    val_pairs = labeled_df[labeled_df["source1_entity_id"].isin(val_set)]
+    print(f"\n  Train pairs: {len(train_pairs):,} (pos: {train_pairs['label'].sum():,})")
+    print(f"  Val pairs:   {len(val_pairs):,} (pos: {val_pairs['label'].sum():,})")
+
+    # ===================================================================
+    # 4. EXTRACT FEATURES
+    # ===================================================================
+    # Build record lookup from normalized dataframes
+    print("\nBuilding record lookup...")
+    records_db = {}
+    for df in [s1_norm, s2_norm, s3_norm]:
+        for _, r in df.iterrows():
+            records_db[r["entity_id"]] = r.to_dict()
+
+    print("Extracting features (train)...")
+    t0 = time.time()
+    X_train, y_train, meta_train, feature_names = _build_feature_matrix(train_pairs, records_db)
+    print(f"  {len(X_train)} pairs, {len(feature_names)} features — {time.time()-t0:.1f}s")
+    print(f"  Features: {feature_names}")
+
+    print("Extracting features (val)...")
+    t0 = time.time()
+    X_val, y_val, meta_val, _ = _build_feature_matrix(val_pairs, records_db)
+    print(f"  {len(X_val)} pairs — {time.time()-t0:.1f}s")
+
+    # ===================================================================
+    # 5. TRAIN MODELS
+    # ===================================================================
+    models_to_test = {
+        "LogReg_Plain": lambda: train_logreg(X_train, y_train, balanced=False),
+        "LogReg_Balanced": lambda: train_logreg(X_train, y_train, balanced=True),
+        "RandomForest": lambda: train_rf(X_train, y_train),
+        "LightGBM": lambda: train_lgbm(X_train, y_train, cfg),
+    }
+
+    # Build val ground truth and candidates for metric computation
+    val_gt = {k: ground_truth.get(k, []) for k in val_ids}
+    val_cands_dict = {}
+    for _, row in candidates_df.iterrows():
+        s1_id = str(row["source1_entity_id"])
+        if s1_id in val_set:
+            cand_str = str(row.get("candidate_entity_ids", "")).strip()
+            val_cands_dict[s1_id] = [c.strip() for c in cand_str.split(",") if c.strip()] if cand_str else []
+
+    avg_cands = np.mean([len(v) for v in val_cands_dict.values()]) if val_cands_dict else 0.0
+
+    best_model_name = None
+    best_f05 = 0.0
+    best_threshold = 0.5
+
+    for model_name, train_fn in models_to_test.items():
+        print(f"\n{'='*60}")
+        print(f"Training: {model_name}")
+        print(f"{'='*60}")
+
+        t0 = time.time()
+        model = train_fn()
+        train_time = time.time() - t0
+
+        save_model(model, f"experiments/models/{model_name}.pkl")
+
+        if len(X_val) == 0:
+            print("  No val data — skipping evaluation.")
+            continue
+
         probs = model.predict_proba(X_val)[:, 1]
-    else:
-        probs = []
-        
-    scores_df = pd.DataFrame(val_meta, columns=["source1_entity_id", "candidate_entity_id"])
-    scores_df["score"] = probs
-    
-    # Using threshold 0.5 as requested in step 4
-    preds = predict_matches(scores_df, threshold=0.5)
-    
-    metrics = calculate_metrics(preds, val_gt)
-    runtime = time.time() - t0
-    
-    # Calculate singleton accuracy
-    true_singletons = [k for k, v in val_gt.items() if not v]
-    if true_singletons:
-        correct_singletons = sum(1 for k in true_singletons if not preds.get(k, []))
-        sing_acc = correct_singletons / len(true_singletons)
-    else:
-        sing_acc = 1.0
-        
-    # Calculate positive match precision
-    pos_precision_list = []
-    for k, v in val_gt.items():
-        if v: # has >= 1 true match
-            p_set = set(preds.get(k, []))
-            t_set = set(v)
-            if len(p_set) > 0:
-                pos_precision_list.append(len(p_set & t_set) / len(p_set))
-            else:
-                pos_precision_list.append(0.0)
-    pos_prec = np.mean(pos_precision_list) if pos_precision_list else 1.0
 
-    print(f"\nModel: {model_name}")
-    print(f"Macro F0.5: {metrics['macro_f05']:.4f}")
-    print(f"Macro Precision: {metrics['macro_precision']:.4f}")
-    print(f"Macro Recall: {metrics['macro_recall']:.4f}")
-    print(f"Singleton Accuracy: {sing_acc:.4f}")
-    print(f"Positive-Match Precision: {pos_prec:.4f}")
-    print(f"Runtime: {runtime:.2f}s")
-    
-    with open(log_path, "a") as f:
-        f.write(f"Phase5_Baseline,Baseline_Rules,Basic_Strings,{model_name},0.5,{cand_recall:.4f},{metrics['macro_precision']:.4f},{metrics['macro_recall']:.4f},{metrics['macro_f05']:.4f},{avg_cands:.1f},{runtime:.2f}\n")
+        # Build scores DataFrame for threshold search
+        scores_df = pd.DataFrame(meta_val, columns=["source1_entity_id", "candidate_entity_id"])
+        scores_df["score"] = probs
 
-# ABLATION
-print("\nRunning Feature Ablation with LogReg (Balanced)...")
-def run_ablation(feat_indices, name):
-    X_tr = X_train[:, feat_indices]
-    X_v = X_val[:, feat_indices]
-    t0 = time.time()
-    model = train_logreg(X_tr, y_train, balanced=True)
-    if len(X_v) > 0: probs = model.predict_proba(X_v)[:, 1]
-    else: probs = []
-    scores_df = pd.DataFrame(val_meta, columns=["source1_entity_id", "candidate_entity_id"])
-    scores_df["score"] = probs
-    preds = predict_matches(scores_df, threshold=0.5)
-    metrics = calculate_metrics(preds, val_gt)
-    runtime = time.time() - t0
-    print(f"Ablation [{name}] F0.5: {metrics['macro_f05']:.4f}")
-    with open(log_path, "a") as f:
-        f.write(f"Phase5_Ablation,Baseline_Rules,{name},LogReg (Balanced),0.5,{cand_recall:.4f},{metrics['macro_precision']:.4f},{metrics['macro_recall']:.4f},{metrics['macro_f05']:.4f},{avg_cands:.1f},{runtime:.2f}\n")
+        # Threshold search on val split
+        t_cfg = cfg["threshold"]
+        best_t, best_val_f05, best_metrics = optimize_threshold(
+            scores_df, val_gt,
+            t_min=t_cfg["grid_min"],
+            t_max=t_cfg["grid_max"],
+            t_step=t_cfg["grid_step"],
+        )
 
-# Features: 0:name_lev, 1:name_jaro, 2:addr_lev, 3:name_exact, 4:country_match
-run_ablation([0, 1, 3], "Name_Only")
-run_ablation([2, 4], "Address_And_Country_Only")
+        runtime = time.time() - t0
 
-print("\nDone.")
+        print(f"  Best threshold:    {best_t:.3f}")
+        print(f"  Macro F0.5:        {best_metrics['macro_f05']:.4f}")
+        print(f"  Macro Precision:   {best_metrics['macro_precision']:.4f}")
+        print(f"  Macro Recall:      {best_metrics['macro_recall']:.4f}")
+        print(f"  Train time:        {train_time:.2f}s")
+        print(f"  Total runtime:     {runtime:.2f}s")
+
+        log_experiment(
+            cfg, experiment_name=f"Phase5_{model_name}",
+            blocking_desc="ABCD_Pruned",
+            features_desc=f"{X_train.shape[1]}_features",
+            model_name=model_name,
+            threshold=best_t,
+            metrics={**best_metrics, "candidate_recall": ""},
+            avg_candidates=avg_cands,
+            runtime=runtime,
+        )
+
+        if best_val_f05 > best_f05:
+            best_f05 = best_val_f05
+            best_model_name = model_name
+            best_threshold = best_t
+
+    print(f"\n{'='*70}")
+    print(f"BEST MODEL: {best_model_name}  |  F0.5={best_f05:.4f}  |  Threshold={best_threshold:.3f}")
+    print(f"{'='*70}")
+
+
+def _build_feature_matrix(pairs_df, records_db):
+    """Delegate to extract_features_batch — no duplicated logic."""
+    return extract_features_batch(pairs_df, records_db)
+
+
+if __name__ == "__main__":
+    main()

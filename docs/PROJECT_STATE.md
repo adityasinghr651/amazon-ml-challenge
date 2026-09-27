@@ -1,6 +1,6 @@
 # Amazon ML Challenge 2026: Business Entity Resolution — Project State
 
-> **Last Updated:** Phase 1 Complete (September 2026)  
+> **Last Updated:** Step 0–6 Implementation (September 2026)  
 > **Core Optimization Mandate:** **TWO-OBJECTIVE OPTIMIZATION**  
 > 1. **High-Quality Entity Matching:** Macro-averaged $F_{0.5}$ (Precision-heavy: $2\times$ weight on precision; singletons protected)  
 > 2. **Efficient, Scalable Blocking / Candidate Generation:** Smallest practical candidate set per $S_1$ entity while preserving high candidate recall ceiling and large reduction ratio ($>99.99\%$).  
@@ -14,75 +14,73 @@
 ┌─────────┬─────────────────────────────────────────────────┬────────────┬──────────────────────────────────────┐
 │ Phase   │ Description                                     │ Status     │ Artifact / Key Output                │
 ├─────────┼─────────────────────────────────────────────────┼────────────┼──────────────────────────────────────┤
-│ Phase 0 │ Environment & Repository Infrastructure         │ [DONE]     │ requirements.txt, io.py, evaluation.py│
+│ Phase 0 │ Environment & Repository Infrastructure         │ [DONE]     │ requirements.txt, config.yaml, utils │
 │ Phase 1 │ Comprehensive Dataset Forensics & Noise Profile │ [DONE]     │ docs/phase_reports/phase_01_*.md     │
 │ Phase 2 │ Multi-Representation Normalization Engine       │ [DONE]     │ docs/phase_reports/phase_02_*.md     │
-│ Phase 3 │ High-Recall Multi-Blocker & candidate_pairs.tsv  │ [CURRENT]  │ src/business_entity_resolution/block*│
-│ Phase 4 │ Pairwise Feature Engineering (Vectorized)       │ [PENDING]  │ src/business_entity_resolution/feat* │
-│ Phase 5 │ Baseline ML Model & Hard Negative Mining        │ [PENDING]  │ src/business_entity_resolution/train*│
-│ Phase 6 │ Macro F0.5 Threshold & Singleton Decision Layer │ [PENDING]  │ src/business_entity_resolution/dec*  │
-│ Phase 7 │ Final Inference, Validation PASS & Packaging    │ [PENDING]  │ <team>_submission.zip                │
+│ Phase 3 │ High-Recall Multi-Blocker & candidate_pairs.tsv │ [DONE]     │ blocking.py (improved pruning)       │
+│ Phase 4 │ Pairwise Feature Engineering (21 features)      │ [DONE]     │ features.py (TF-IDF fit-once)        │
+│ Phase 5 │ Baseline ML Model (LR/RF/LightGBM)             │ [DONE]     │ training.py, run_phase5.py           │
+│ Phase 6 │ Two-Band Threshold & Singleton Decision Layer   │ [DONE]     │ decision.py                          │
+│ Phase 7 │ Final Inference, Validation PASS & Packaging    │ [READY]    │ inference.py (built, needs run)      │
 └─────────┴─────────────────────────────────────────────────┴────────────┴──────────────────────────────────────┘
 ```
 
 ---
 
-## 2. Quantitative Baseline & Key Data Realities
+## 2. What Changed (Optimization Roadmap Implementation)
 
-| Metric / Dimension | Training Set | Testing Set | Notes & Constraints |
-| :--- | :--- | :--- | :--- |
-| **Source 1 (Reference)** | 2,206,821 records | 1,732,544 records | Deduplicated ground-truth reference |
-| **Source 2 (Noisy)** | 5,034,616 records | 4,887,273 records | ~3.3% missing addresses |
-| **Source 3 (Noisy)** | 5,285,603 records | 5,082,316 records | ~3.3% missing addresses |
-| **Ground Truth Links** | 7,638,365 pairs | *Unlabeled* | Average 3.46 matches / S1 |
-| **Singletons (0 match)** | **123,247 (5.58%)** | Unknown | Must predict empty string `""` |
-| **Country: US** | 59.98% | 38.27% | Open-set dynamic partitioning |
-| **Country: India** | 40.02% | 46.75% | Multi-script transliterations (Tamil, Hindi) |
-| **Country: France** | **0.00% (Unseen)** | **14.98% (259.5k)** | Must NEVER hardcode country filter |
-| **Cartesian Pair Space** | ~22.7 Trillion pairs | ~17.2 Trillion pairs | Blocking is mandatory |
+### Step 0 — Repo Unblocked
+- `requirements.txt`: added `psutil`, `joblib`, `pyyaml`, pinned `lightgbm==4.5.0`
+- `config.yaml`: central config with all hyperparameters (blocking, LightGBM, thresholds, splits)
+- `utils.py`: config loader, experiment logger, blocking config extractor
 
----
+### Step 1 — Fixed Candidate Pipeline
+- `preprocessing.py`: reusable functions for ground-truth parsing, labeled-pair generation (anti-join pattern), entity-grouped 3-way splits (train/val/holdout)
+- `blocking.py`: pruning now uses normalized fields (`name_core` tokens, `addr_pin` match bonus)
+- `run_phase5.py`: complete rewrite — uses proper blocking (not baseline), no true-match injection
+- `run_blocking_exp.py`: rewritten with entity-grouped 10% sampling, match/singleton decomposition, F0.5 ceiling
 
-## 3. Directory Layout & Document Map
+### Step 2 — Expanded Features (21 features)
+- `features.py`: 10 name features, 6 address features, 3 cross-field features, 2 TF-IDF cosine features
+- All features read from normalization output columns (not raw strings)
+- TF-IDF vectorizers fit once via `fit_tfidf_vectorizers()`, shared across all pairs
 
-```
-amazon-ml-challenge/
-├── dataset/                                           # Active dataset root
-│   ├── train/                                         # train_source1, 2, 3, ground_truth TSVs
-│   └── test/                                          # test_source1, 2, 3 TSVs
-├── docs/
-│   ├── PROJECT_STATE.md                                # Central project state tracker
-│   └── phase_reports/
-│       ├── phase_01_dataset_forensics.md              # Phase 1 forensics findings & noise statistics
-│       └── ... (future phase documentation)
-├── src/business_entity_resolution/
-│   ├── __init__.py
-│   ├── io.py                                          # Strict TSV reading/writing with auto-path resolution
-│   ├── forensics.py                                   # Dataset profiling engine
-│   ├── normalization.py                               # Multi-script, legal suffix, address normalizer
-│   ├── blocking.py                                    # Multi-pass blocking & candidate generator
-│   ├── features.py                                    # Vectorized pairwise string/token similarities
-│   ├── training.py                                    # LightGBM classifier & hard negative trainer
-│   ├── decision.py                                    # Macro F0.5 threshold & singleton handler
-│   ├── evaluation.py                                  # Exact competition Macro F0.5 metric harness
-│   └── utils.py                                       # Helper utilities
-├── results/
-│   └── dataset_forensics_report.md                    # Generated Phase 1 markdown output
-├── output/                                            # Generated submissions & candidates
-│   ├── matching_results.tsv                           # Final matched entity pairs (Leaderboard)
-│   └── candidate_pairs.tsv                            # Blocking candidate set (Audit & Final Ranking)
-├── utils/
-│   └── validate_submission.py                         # Official submission format validator
-├── student_resource/                                  # Original resource package backup
-├── requirements.txt                                   # Pinned dependencies
-├── PROJECT_CONTEXT.md                                 # Competition law & project requirements
-└── README.md
-```
+### Step 3 — LightGBM + Hard Negatives
+- `training.py`: `train_lgbm()` reads hyperparams from config.yaml
+- `mine_hard_negatives()`: selects top-k most similar non-matching candidates per S1 (train split only)
+
+### Step 4 — Two-Band Threshold
+- `decision.py`: `predict_matches_two_band(t_high, t_low)` — borderline defaults to non-match
+- `optimize_two_band_threshold()`: joint grid search on val split
+
+### Step 5 — Inference Pipeline
+- `inference.py`: imports exact same functions from training path, no reimplementation
+- 1% profiling step before full run, with runtime/memory feasibility checks
+- CLI-driven with argparse
+
+### Step 6 — Error Analysis
+- `evaluation.py`: `decomposed_error_analysis()` separates blocking misses from classifier mistakes
+- `print_error_analysis()`: actionable recommendation (focus on blocking vs model)
 
 ---
 
-## 4. Key Rules & Technical Constraints
+## 3. Key Data Realities
 
-1. **Precision-First Mindset**: $F_{0.5} = \frac{1.25 \cdot P \cdot R}{0.25 \cdot P + R}$. Precision is weighted $2\times$ over recall. A false merge penalizes the score drastically.
-2. **Strict Offline Compliance**: Zero external lookups, geocoding APIs, Google Maps, or external databases. Model size $\le 8\text{B}$ parameters, MIT/Apache-2.0 license.
-3. **Format Integrity**: Every $S_1$ entity must appear once. Candidate pairs must be a superset of final matches. Output validated via `validate_submission.py`.
+| Metric / Dimension | Training Set | Testing Set |
+| :--- | :--- | :--- |
+| **Source 1 (Reference)** | 2,206,821 records | 1,732,544 records |
+| **Source 2 (Noisy)** | 5,034,616 records | 4,887,273 records |
+| **Source 3 (Noisy)** | 5,285,603 records | 5,082,316 records |
+| **Ground Truth Links** | 7,638,365 pairs | *Unlabeled* |
+| **Singletons (0 match)** | 123,247 (5.58%) | Unknown |
+| **Country: France** | 0.00% (Unseen) | 14.98% |
+
+---
+
+## 4. Next Steps (Before Submission)
+
+1. **Run `run_blocking_exp.py`** on 10% sample → get real blocking recall + candidate counts
+2. **Run `run_phase5.py`** → train LightGBM on real candidates, get first trustworthy F0.5
+3. **Run `inference.py`** on test data → generate submission files
+4. **Validate** with `utils/validate_submission.py`
+5. **Error analysis** on holdout split → decide whether to improve blocking or model

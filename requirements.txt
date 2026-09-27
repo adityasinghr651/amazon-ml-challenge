@@ -2,5 +2,8 @@ pandas
 numpy
 rapidfuzz
 scikit-learn
-lightgbm
+lightgbm==4.5.0
 pytest
+psutil
+joblib
+pyyaml

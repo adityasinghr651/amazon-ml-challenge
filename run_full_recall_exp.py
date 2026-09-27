@@ -1,3 +1,14 @@
+"""
+DEPRECATED: This script duplicates blocking logic from src/business_entity_resolution/blocking.py.
+Use run_blocking_exp.py instead, which calls the proper blocking module.
+"""
+import warnings
+warnings.warn(
+    "run_full_recall_exp.py is DEPRECATED. Use run_blocking_exp.py instead.",
+    DeprecationWarning,
+    stacklevel=1,
+)
+
 import pandas as pd
 import numpy as np
 import time
