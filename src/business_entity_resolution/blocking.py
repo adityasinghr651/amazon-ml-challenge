@@ -74,13 +74,18 @@ def generate_candidates(s1_df: pd.DataFrame, s2_df: pd.DataFrame, s3_df: pd.Data
     index_c = build_index_c(combined_df, config) if 'C' in active_blocks else {}
     vectorizer_d, nn_d, d_entity_ids = build_index_d(combined_df, config) if 'D' in active_blocks else (None, None, [])
     
-    # Pre-build lookup for pruning
+    # Pre-build lookup for pruning — uses normalized fields for ranking
     entity_dict = {}
     if config.get('enable_pruning', True):
         for idx, row in combined_df.iterrows():
+            # Use name_core tokens (legal suffixes removed) for sharper pruning
+            core_str = str(row.get('name_core', '')) if row.get('name_core') else ''
+            core_toks = set(core_str.split()) if core_str else set()
             entity_dict[row['entity_id']] = {
                 'name_toks': set(row['name_tokens']) if isinstance(row['name_tokens'], list) else set(),
-                'addr_toks': set(row['addr_tokens']) if isinstance(row['addr_tokens'], list) else set()
+                'name_core_toks': core_toks,
+                'addr_toks': set(row['addr_tokens']) if isinstance(row['addr_tokens'], list) else set(),
+                'addr_pin': str(row.get('addr_pin', '')),
             }
             
     # Batch ANN query
@@ -125,23 +130,30 @@ def generate_candidates(s1_df: pd.DataFrame, s2_df: pd.DataFrame, s3_df: pd.Data
         if 'D' in active_blocks:
             candidates.update(d_candidates[i])
             
-        # 3. PRUNING / RERANKING
+        # 3. PRUNING / RERANKING using normalized fields
         if config.get('enable_pruning', True) and len(candidates) > config.get('max_candidates_before_pruning', 50):
-            s1_nt = set(row['name_tokens']) if isinstance(row['name_tokens'], list) else set()
+            # Use name_core tokens (legal suffixes stripped) for sharper ranking
+            s1_core_str = str(row.get('name_core', '')) if row.get('name_core') else ''
+            s1_core_toks = set(s1_core_str.split()) if s1_core_str else set()
             s1_at = set(row['addr_tokens']) if isinstance(row['addr_tokens'], list) else set()
+            s1_pin = str(row.get('addr_pin', ''))
             
             scored_cands = []
             for cand in candidates:
                 if cand in entity_dict:
                     c_data = entity_dict[cand]
-                    c_nt = c_data['name_toks']
+                    c_core_toks = c_data['name_core_toks']
                     c_at = c_data['addr_toks']
                     
-                    n_union = len(s1_nt | c_nt)
-                    n_score = len(s1_nt & c_nt) / n_union if n_union > 0 else 0
+                    # Core-name Jaccard (normalized, suffix-free)
+                    n_union = len(s1_core_toks | c_core_toks)
+                    n_score = len(s1_core_toks & c_core_toks) / n_union if n_union > 0 else 0
+                    # Address token overlap
                     a_score = len(s1_at & c_at)
+                    # PIN code exact match bonus
+                    pin_bonus = 0.5 if (s1_pin and s1_pin == c_data['addr_pin']) else 0.0
                     
-                    score = n_score + (a_score * 0.2)
+                    score = n_score + (a_score * 0.2) + pin_bonus
                     scored_cands.append((score, cand))
                 else:
                     scored_cands.append((0, cand))
