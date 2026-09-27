@@ -19,7 +19,7 @@ sys.path.insert(0, os.getcwd())
 
 from src.business_entity_resolution.io import load_train_data
 from src.business_entity_resolution.normalization import process_dataframe
-from src.business_entity_resolution.blocking import generate_candidates, measure_blocking_performance
+from src.business_entity_resolution.blocking_legacy import generate_candidates, measure_blocking_performance
 from src.business_entity_resolution.preprocessing import parse_ground_truth, sample_s1_grouped
 from src.business_entity_resolution.utils import load_config, get_blocking_config
 

@@ -43,6 +43,73 @@ class CandidateUnionEngine:
         """Returns unioned candidates as {s1_id: set(candidate_ids)}."""
         return {s1_id: set(cand_map.keys()) for s1_id, cand_map in self.provenance.items()}
 
+    def prune(self, s1_df: pd.DataFrame, target_df: pd.DataFrame, max_cands: int = 50, top_k: int = 20, quota_per_strategy: int = 4):
+        """
+        Quota-based pruning: 
+        1. Keep top-N candidates from EACH strategy based on coarse score.
+        2. Fill remaining slots up to top_k with the highest overall coarse-score candidates.
+        """
+        print(f"Applying quota-based pruning (max_cands={max_cands}, top_k={top_k}, quota={quota_per_strategy})...")
+        s1_data = {row['entity_id']: row for _, row in s1_df.iterrows()}
+        target_data = {row['entity_id']: row for _, row in target_df.iterrows()}
+
+        for s1_id, cand_map in self.provenance.items():
+            if len(cand_map) <= max_cands:
+                continue
+            
+            s1_row = s1_data.get(s1_id)
+            if s1_row is None:
+                continue
+                
+            s1_nt = set(s1_row.get('name_informative_tokens', [])) if isinstance(s1_row.get('name_informative_tokens'), list) else set()
+            s1_at = set(s1_row.get('addr_tokens', [])) if isinstance(s1_row.get('addr_tokens'), list) else set()
+
+            # 1. Score all candidates
+            c_scores = {}
+            for c_id in cand_map.keys():
+                c_row = target_data.get(c_id)
+                if c_row is None:
+                    c_scores[c_id] = 0.0
+                    continue
+                
+                c_nt = set(c_row.get('name_informative_tokens', [])) if isinstance(c_row.get('name_informative_tokens'), list) else set()
+                c_at = set(c_row.get('addr_tokens', [])) if isinstance(c_row.get('addr_tokens'), list) else set()
+                
+                nu = len(s1_nt | c_nt)
+                ns = len(s1_nt & c_nt) / nu if nu > 0 else 0.0
+                
+                au = len(s1_at | c_at)
+                ast = len(s1_at & c_at) / au if au > 0 else 0.0
+                
+                c_scores[c_id] = ns + (ast * 0.2)
+                
+            # 2. Group by strategy
+            strategy_groups = defaultdict(list)
+            for c_id, strats in cand_map.items():
+                score = c_scores[c_id]
+                for strat in strats:
+                    strategy_groups[strat].append((score, c_id))
+                    
+            # 3. Select top candidates per strategy
+            selected_c_ids = set()
+            for strat, scored_list in strategy_groups.items():
+                scored_list.sort(key=lambda x: x[0], reverse=True)
+                for _, c_id in scored_list[:quota_per_strategy]:
+                    selected_c_ids.add(c_id)
+                    
+            # 4. Fill remaining slots if we haven't reached top_k
+            if len(selected_c_ids) < top_k:
+                remaining_cands = [(score, c_id) for c_id, score in c_scores.items() if c_id not in selected_c_ids]
+                remaining_cands.sort(key=lambda x: x[0], reverse=True)
+                needed = top_k - len(selected_c_ids)
+                for _, c_id in remaining_cands[:needed]:
+                    selected_c_ids.add(c_id)
+                    
+            # 5. Remove dropped candidates from provenance
+            dropped = set(cand_map.keys()) - selected_c_ids
+            for c_id in dropped:
+                del cand_map[c_id]
+
     def to_official_dataframe(self, all_s1_ids: Optional[List[str]] = None) -> pd.DataFrame:
         """
         Builds official DataFrame adhering strictly to competition schema:

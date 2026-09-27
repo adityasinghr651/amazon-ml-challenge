@@ -1,2 +1,2 @@
 strategy	pair_recall	entity_recovery	total_candidates	avg_candidates	median_candidates	p95_candidates	p99_candidates	p99_9_candidates	max_candidates	reduction_ratio	runtime_s
-ExactName+Address+RareToken+ReciprocalCharRetrieval+Transliteration	0.9012	0.782	474960	94.99	71.0	238.1	329.0	490.0	717	0.999191	35.47
+ExactName+Address+RareToken+ReciprocalCharRetrieval+Transliteration	0.8931	0.7361	128753	25.75	20.0	46.0	50.0	50.0	50	0.999781	28.85
