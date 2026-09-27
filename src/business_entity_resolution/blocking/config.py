@@ -24,7 +24,7 @@ class AddressBlockConfig:
     use_pin_only: bool = False       # B1: addr_pin
     use_pin_primary_num: bool = True # B2: addr_pin + addr_primary_num
     use_pin_name_token: bool = False # B3: addr_pin + first informative name token
-    max_bucket_size: int = 500       # Safeguard against common postal codes/numbers
+    max_bucket_size: int = 30        # Safeguard against common postal codes/numbers
 
 ExactNameConfig = NameBlockConfig
 AddressConfig = AddressBlockConfig
@@ -35,7 +35,7 @@ class RareTokenConfig:
     max_doc_freq: int = 200          # Absolute maximum document frequency across corpus
     min_token_len: int = 3           # Minimum token length to consider
     top_n_rare: int = 2              # Top N rarest tokens per entity to index/query
-    max_bucket_size: int = 300       # Maximum records per token bucket
+    max_bucket_size: int = 30        # Maximum records per token bucket
 
 @dataclass
 class RetrievalConfig:
@@ -54,8 +54,8 @@ class CountryConfig:
 
 @dataclass
 class PruningConfig:
-    enabled: bool = False            # Pruning MUST be disabled by default as per competition rules!
-    strategy: str = "none"           # 'none', 'top_k', 'score_threshold'
+    enabled: bool = True             # Enforce top-K pruning to prevent candidate explosion
+    strategy: str = "jaccard_top_k"  # 'none', 'top_k', 'jaccard_top_k'
     max_candidates: int = 50
     prune_top_k: int = 20
 

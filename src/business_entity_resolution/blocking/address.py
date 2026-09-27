@@ -35,6 +35,10 @@ class AddressAnchorBlocker(BaseBlocker):
         self.index_pin: Dict[str, Dict[str, List[str]]] = defaultdict(lambda: defaultdict(list))
         self.index_pin_num: Dict[str, Dict[str, List[str]]] = defaultdict(lambda: defaultdict(list))
         self.index_pin_token: Dict[str, Dict[str, List[str]]] = defaultdict(lambda: defaultdict(list))
+        
+        # Fallback indexes
+        self.index_loc_num_with_pin: Dict[str, Dict[str, List[str]]] = defaultdict(lambda: defaultdict(list))
+        self.index_loc_num_no_pin: Dict[str, Dict[str, List[str]]] = defaultdict(lambda: defaultdict(list))
 
         self.target_countries: Set[str] = set()
 
@@ -56,9 +60,31 @@ class AddressAnchorBlocker(BaseBlocker):
         nums = target_df['addr_primary_num'].values if 'addr_primary_num' in target_df.columns else None
         inf_tokens = target_df['name_informative_tokens'].values if 'name_informative_tokens' in target_df.columns else None
 
+        def get_locality(tokens):
+            if not isinstance(tokens, (list, np.ndarray)): return ""
+            for t in reversed(tokens):
+                if isinstance(t, str) and len(t) >= 3 and not t.isdigit():
+                    return t
+            return ""
+
         for idx, eid in enumerate(eids):
             c = countries[idx] if countries[idx] else '__GLOBAL__'
             pin = pins[idx] if pins is not None else ""
+            num = nums[idx] if nums is not None else ""
+            toks = inf_tokens[idx] if inf_tokens is not None else []
+            addr_toks = target_df['addr_tokens'].values[idx] if 'addr_tokens' in target_df.columns else []
+            
+            loc = get_locality(addr_toks)
+            
+            # Fallback B4: Locality + Primary Number (Only used when PIN is missing on at least one side)
+            if self.cfg.use_pin_primary_num and num and loc:
+                key_loc_num = f"{loc}_{num}"
+                if pin:
+                    self.index_loc_num_with_pin[c][key_loc_num].append(eid)
+                    self.index_loc_num_with_pin['__GLOBAL__'][key_loc_num].append(eid)
+                else:
+                    self.index_loc_num_no_pin[c][key_loc_num].append(eid)
+                    self.index_loc_num_no_pin['__GLOBAL__'][key_loc_num].append(eid)
 
             if not pin:
                 continue
@@ -69,12 +95,10 @@ class AddressAnchorBlocker(BaseBlocker):
                 self.index_pin['__GLOBAL__'][pin].append(eid)
 
             # B2: Postal code + Primary number
-            if self.cfg.use_pin_primary_num and nums is not None:
-                num = nums[idx]
-                if num:
-                    key_pin_num = f"{pin}_{num}"
-                    self.index_pin_num[c][key_pin_num].append(eid)
-                    self.index_pin_num['__GLOBAL__'][key_pin_num].append(eid)
+            if self.cfg.use_pin_primary_num and num:
+                key_pin_num = f"{pin}_{num}"
+                self.index_pin_num[c][key_pin_num].append(eid)
+                self.index_pin_num['__GLOBAL__'][key_pin_num].append(eid)
 
             # B3: Postal code + First informative name token
             if self.cfg.use_pin_name_token and inf_tokens is not None:
@@ -86,9 +110,14 @@ class AddressAnchorBlocker(BaseBlocker):
                     self.index_pin_token['__GLOBAL__'][key_pin_tok].append(eid)
 
         # Enforce max_bucket_size safeguard & profile distributions
-        for strat_name, idx_dict in [("B1_PIN", self.index_pin), 
-                                     ("B2_PIN_NUM", self.index_pin_num), 
-                                     ("B3_PIN_TOKEN", self.index_pin_token)]:
+        indexes_to_profile = [
+            ("B1_PIN", self.index_pin), 
+            ("B2_PIN_NUM", self.index_pin_num), 
+            ("B3_PIN_TOKEN", self.index_pin_token),
+            ("B4_LOC_NUM_WITH_PIN", self.index_loc_num_with_pin),
+            ("B4_LOC_NUM_NO_PIN", self.index_loc_num_no_pin)
+        ]
+        for strat_name, idx_dict in indexes_to_profile:
             for c, key_map in idx_dict.items():
                 for k, postings in list(key_map.items()):
                     b_size = len(postings)
@@ -112,13 +141,38 @@ class AddressAnchorBlocker(BaseBlocker):
         nums = query_df['addr_primary_num'].values if 'addr_primary_num' in query_df.columns else None
         inf_tokens = query_df['name_informative_tokens'].values if 'name_informative_tokens' in query_df.columns else None
 
+        def get_locality(tokens):
+            if not isinstance(tokens, (list, np.ndarray)): return ""
+            for t in reversed(tokens):
+                if isinstance(t, str) and len(t) >= 3 and not t.isdigit():
+                    return t
+            return ""
+
         for idx, q_eid in enumerate(eids):
             c_val = countries[idx] if countries[idx] else '__GLOBAL__'
             c_key = c_val if c_val in self.target_countries else '__GLOBAL__'
             pin = pins[idx] if pins is not None else ""
+            num = nums[idx] if nums is not None else ""
+            toks = inf_tokens[idx] if inf_tokens is not None else []
+            addr_toks = query_df['addr_tokens'].values[idx] if 'addr_tokens' in query_df.columns else []
+            loc = get_locality(addr_toks)
 
+            cand_set = set()
+            
             if not pin:
-                candidates[q_eid] = set()
+                # Query has no PIN. Use fallback if possible.
+                if self.cfg.use_pin_primary_num and num and loc:
+                    key = f"{loc}_{num}"
+                    # Match targets that also have NO PIN
+                    postings_no_pin = self.index_loc_num_no_pin.get(c_key, {}).get(key, [])
+                    if 0 < len(postings_no_pin) <= self.max_bucket_size:
+                        cand_set.update(postings_no_pin)
+                    # Match targets that HAVE A PIN (query is missing it)
+                    postings_with_pin = self.index_loc_num_with_pin.get(c_key, {}).get(key, [])
+                    if 0 < len(postings_with_pin) <= self.max_bucket_size:
+                        cand_set.update(postings_with_pin)
+                candidates[q_eid] = cand_set
+                self.total_candidates_generated += len(cand_set)
                 continue
 
             cand_set = set()
@@ -129,18 +183,22 @@ class AddressAnchorBlocker(BaseBlocker):
                 if 0 < len(pin_postings) <= self.max_bucket_size:
                     cand_set.update(pin_postings)
 
-            # B2: Match PIN + Primary Number
-            if self.cfg.use_pin_primary_num and nums is not None:
-                num = nums[idx]
-                if num:
-                    key = f"{pin}_{num}"
-                    pin_num_postings = self.index_pin_num.get(c_key, {}).get(key, [])
-                    if 0 < len(pin_num_postings) <= self.max_bucket_size:
-                        cand_set.update(pin_num_postings)
+            # B2: Match PIN + Primary Number (Primary Path)
+            if self.cfg.use_pin_primary_num and num:
+                key = f"{pin}_{num}"
+                pin_num_postings = self.index_pin_num.get(c_key, {}).get(key, [])
+                if 0 < len(pin_num_postings) <= self.max_bucket_size:
+                    cand_set.update(pin_num_postings)
+                
+                # Fallback: Query HAS pin, but Target might be missing it.
+                if loc:
+                    key_loc = f"{loc}_{num}"
+                    postings_no_pin = self.index_loc_num_no_pin.get(c_key, {}).get(key_loc, [])
+                    if 0 < len(postings_no_pin) <= self.max_bucket_size:
+                        cand_set.update(postings_no_pin)
 
             # B3: Match PIN + First Informative Name Token
-            if self.cfg.use_pin_name_token and inf_tokens is not None:
-                toks = inf_tokens[idx]
+            if self.cfg.use_pin_name_token and toks:
                 first_tok = toks[0] if isinstance(toks, list) and len(toks) > 0 else ""
                 if first_tok:
                     key = f"{pin}_{first_tok}"
